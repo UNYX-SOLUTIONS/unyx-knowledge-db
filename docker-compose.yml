@@ -5,8 +5,8 @@ services:
     restart: unless-stopped
 
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB:-unyx}
+      POSTGRES_USER: ${POSTGRES_USER:-unyx_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       TZ: ${TZ:-America/Guayaquil}
 
@@ -21,7 +21,6 @@ services:
 
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./database/init:/docker-entrypoint-initdb.d:ro
       - ./backups:/backups
 
     networks:
@@ -29,10 +28,15 @@ services:
       - unyx-ai
 
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-unyx_admin} -d ${POSTGRES_DB:-unyx}"
+        ]
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 10s
 
 volumes:
   postgres-data:
@@ -41,5 +45,6 @@ volumes:
 networks:
   unyx-db-admin:
     external: true
+
   unyx-ai:
     external: true

@@ -1,124 +1,135 @@
-CREATE TABLE IF NOT EXISTS public.kb_versions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    version TEXT NOT NULL,
-    source_name TEXT,
-    source_file_id TEXT,
-    source_hash TEXT,
-    status TEXT NOT NULL DEFAULT 'draft'
-        CHECK (status IN ('draft', 'published', 'archived')),
-    notes TEXT,
-    published_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+\set ON_ERROR_STOP on
+
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS kb_versions (
+    id              bigserial PRIMARY KEY,
+    version         text NOT NULL UNIQUE,
+    description     text,
+    status          text NOT NULL DEFAULT 'draft'
+                    CHECK (status IN ('draft','active','archived')),
+    metadata        jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    activated_at    timestamptz
 );
 
-CREATE TABLE IF NOT EXISTS public.products (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    external_id TEXT,
-    sku TEXT,
-    name TEXT NOT NULL,
-    category TEXT,
-    subcategory TEXT,
-    description TEXT,
-    price NUMERIC(14,4),
-    stock NUMERIC(14,4),
-    currency TEXT NOT NULL DEFAULT 'USD',
-    keywords TEXT[] NOT NULL DEFAULT '{}',
-    url TEXT,
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    source TEXT,
-    source_version TEXT,
-    content_hash TEXT,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE UNIQUE INDEX IF NOT EXISTS ux_kb_versions_one_active
+ON kb_versions ((status))
+WHERE status = 'active';
+
+CREATE TABLE IF NOT EXISTS products (
+    id              bigserial PRIMARY KEY,
+    external_id     text,
+    sku             text,
+    name            text NOT NULL,
+    category        text,
+    subcategory     text,
+    description     text,
+    price           numeric(12,2),
+    stock           integer,
+    currency        text NOT NULL DEFAULT 'USD',
+    keywords        text[] NOT NULL DEFAULT ARRAY[]::text[],
+    url             text,
+    metadata        jsonb NOT NULL DEFAULT '{}'::jsonb,
+    source          text,
+    source_version  text,
+    content_hash    text,
+    is_active       boolean NOT NULL DEFAULT true,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS public.documents (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    entity_type TEXT NOT NULL,
-    entity_id TEXT,
-    title TEXT,
-    content TEXT NOT NULL,
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    embedding VECTOR(:dim),
-    embedding_model TEXT,
-    source TEXT,
-    source_id TEXT,
-    source_version TEXT,
-    content_hash TEXT,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+CREATE UNIQUE INDEX IF NOT EXISTS ux_products_sku
+ON products (sku) WHERE sku IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
+CREATE INDEX IF NOT EXISTS idx_products_active ON products(is_active);
+CREATE INDEX IF NOT EXISTS idx_products_metadata ON products USING gin(metadata);
+CREATE INDEX IF NOT EXISTS idx_products_keywords ON products USING gin(keywords);
+
+CREATE TABLE IF NOT EXISTS documents (
+    id              bigserial PRIMARY KEY,
+    external_id     text,
+    title           text,
+    content         text NOT NULL,
+    metadata        jsonb NOT NULL DEFAULT '{}'::jsonb,
+    embedding       vector(:dim),
+    source          text,
+    source_version  text,
+    content_hash    text,
+    is_active       boolean NOT NULL DEFAULT true,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    updated_at      timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS products_category_idx
-    ON public.products (category);
+CREATE INDEX IF NOT EXISTS idx_documents_metadata ON documents USING gin(metadata);
+CREATE INDEX IF NOT EXISTS idx_documents_active ON documents(is_active);
+CREATE INDEX IF NOT EXISTS idx_documents_embedding
+ON documents USING hnsw (embedding vector_cosine_ops);
 
-CREATE INDEX IF NOT EXISTS products_keywords_idx
-    ON public.products USING GIN (keywords);
+CREATE TABLE IF NOT EXISTS n8n_chat_histories (
+    id          bigserial PRIMARY KEY,
+    session_id  varchar(255) NOT NULL,
+    message     jsonb NOT NULL,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
 
-CREATE INDEX IF NOT EXISTS products_metadata_idx
-    ON public.products USING GIN (metadata);
+CREATE INDEX IF NOT EXISTS idx_chat_histories_session
+ON n8n_chat_histories(session_id);
 
-CREATE INDEX IF NOT EXISTS documents_embedding_idx
-    ON public.documents USING hnsw (embedding vector_cosine_ops);
+CREATE TABLE IF NOT EXISTS processed_outgoing_messages (
+    message_id    text PRIMARY KEY,
+    lead_id       text NOT NULL,
+    processed_at  timestamptz NOT NULL DEFAULT now()
+);
 
-CREATE OR REPLACE FUNCTION public.match_documents(
-    query_embedding VECTOR(:dim),
-    match_count INTEGER DEFAULT 8,
-    filter_metadata JSONB DEFAULT '{}'::jsonb
+CREATE INDEX IF NOT EXISTS idx_processed_outgoing_lead
+ON processed_outgoing_messages(lead_id);
+
+CREATE OR REPLACE FUNCTION match_documents(
+    query_embedding vector(:dim),
+    match_count integer DEFAULT 5,
+    filter jsonb DEFAULT '{}'::jsonb
 )
 RETURNS TABLE (
-    id UUID,
-    entity_type TEXT,
-    entity_id TEXT,
-    title TEXT,
-    content TEXT,
-    metadata JSONB,
-    similarity DOUBLE PRECISION
+    id bigint,
+    content text,
+    metadata jsonb,
+    similarity double precision
 )
-LANGUAGE SQL
+LANGUAGE sql
 STABLE
 AS $$
     SELECT
         d.id,
-        d.entity_type,
-        d.entity_id,
-        d.title,
         d.content,
         d.metadata,
         1 - (d.embedding <=> query_embedding) AS similarity
-    FROM public.documents d
-    WHERE
-        d.is_active = TRUE
-        AND d.embedding IS NOT NULL
-        AND (
-            filter_metadata = '{}'::jsonb
-            OR d.metadata @> filter_metadata
-        )
+    FROM documents d
+    WHERE d.is_active = true
+      AND d.embedding IS NOT NULL
+      AND d.metadata @> filter
     ORDER BY d.embedding <=> query_embedding
-    LIMIT GREATEST(match_count, 1);
+    LIMIT match_count;
 $$;
 
-CREATE OR REPLACE FUNCTION public.touch_updated_at()
-RETURNS TRIGGER
+CREATE OR REPLACE FUNCTION touch_updated_at()
+RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    NEW.updated_at = NOW();
+    NEW.updated_at := now();
     RETURN NEW;
 END;
 $$;
 
-DROP TRIGGER IF EXISTS products_touch_updated_at ON public.products;
-CREATE TRIGGER products_touch_updated_at
-    BEFORE UPDATE ON public.products
-    FOR EACH ROW
-    EXECUTE FUNCTION public.touch_updated_at();
+DROP TRIGGER IF EXISTS trg_products_updated_at ON products;
+CREATE TRIGGER trg_products_updated_at
+BEFORE UPDATE ON products
+FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
 
-DROP TRIGGER IF EXISTS documents_touch_updated_at ON public.documents;
-CREATE TRIGGER documents_touch_updated_at
-    BEFORE UPDATE ON public.documents
-    FOR EACH ROW
-    EXECUTE FUNCTION public.touch_updated_at();
-
+DROP TRIGGER IF EXISTS trg_documents_updated_at ON documents;
+CREATE TRIGGER trg_documents_updated_at
+BEFORE UPDATE ON documents
+FOR EACH ROW EXECUTE FUNCTION touch_updated_at();

@@ -1,26 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export MSYS_NO_PATHCONV=1
-
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+set -a; source "$ROOT/.env"; set +a
 CONTAINER="${DB_CONTAINER:-unyx-knowledge-db}"
 ADMIN_USER="${POSTGRES_USER:-unyx_admin}"
-
 TENANT_KEY="${1:-}"
-if [[ -z "$TENANT_KEY" ]]; then
-  echo "Uso: $0 <tenant_key>"
-  exit 1
-fi
-
+[[ -n "$TENANT_KEY" ]] || { echo "Uso: ./scripts/backup-client.sh <tenant_key>"; exit 1; }
 DB_NAME="${TENANT_KEY//-/_}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
-FILE="/backups/${DB_NAME}_${STAMP}.dump"
+FILE="${DB_NAME}_${STAMP}.dump"
 
-docker exec "$CONTAINER" pg_dump \
-  -U "$ADMIN_USER" \
-  -d "$DB_NAME" \
-  --no-owner \
-  --no-acl \
-  -Fc \
-  -f "$FILE"
+mkdir -p "$ROOT/backups"
+docker exec "$CONTAINER" pg_dump -U "$ADMIN_USER" -d "$DB_NAME" \
+  --no-owner --no-acl -Fc -f "/tmp/$FILE"
+docker cp "$CONTAINER:/tmp/$FILE" "$ROOT/backups/$FILE"
+docker exec "$CONTAINER" rm -f "/tmp/$FILE"
 
-echo "Backup creado: ./backups/${DB_NAME}_${STAMP}.dump"
+RETENTION="${BACKUP_RETENTION_DAYS:-14}"
+find "$ROOT/backups" -type f -name "${DB_NAME}_*.dump" -mtime +"$RETENTION" -delete
+
+echo "Backup creado: $ROOT/backups/$FILE"
