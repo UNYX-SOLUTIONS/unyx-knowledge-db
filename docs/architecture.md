@@ -81,4 +81,4 @@ No critical data lives only in memory: every create/edit/delete is written throu
 - `unyx-ai`: n8n and AI services
 - `unyx-db-admin`: global pgAdmin
 
-PostgreSQL is not exposed publicly.
+PostgreSQL is not exposed publicly; port 5432 is published only on `127.0.0.1` so host-side tools (`setup-altosa-db.sh`, `backup.sh`, cron) can reach it from the VPS itself. n8n and other containers reach it by container name on the shared networks.
