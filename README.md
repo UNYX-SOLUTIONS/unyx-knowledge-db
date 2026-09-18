@@ -2,6 +2,14 @@
 
 Reusable Knowledge Base infrastructure for UNYX AI solutions using PostgreSQL 16 + pgvector.
 
+One PostgreSQL server, one isolated database per company.
+
+## Structure
+
+- Server: `unyx-knowledge-db` (PostgreSQL 16 + pgvector)
+- Admin database `unyx`: tenant registry (`unyx_core.tenants`) only
+- One database per company: `altosa`, `meditec`, `unyx_solutions`, ...
+
 ## Requirements
 
 Create the shared Docker networks once:
@@ -20,7 +28,9 @@ docker compose up -d
 docker compose ps
 ```
 
-## Create a client
+`POSTGRES_DB` points to the admin/registry database (`unyx`). On installations that predate the database-per-company model it may still point to `unyx_knowledge`; the scripts read it from `.env`.
+
+## Create a client (company)
 
 ```bash
 chmod +x scripts/*.sh
@@ -28,7 +38,10 @@ set -a
 source .env
 set +a
 ./scripts/create-client.sh altosa "ALTOSA Mobiliario" 1536
+./scripts/create-client.sh unyx-solutions "UNYX Solutions" 1536
 ```
+
+This creates: the app role, the company database (`unyx-solutions` -> `unyx_solutions`), the base schema and the registry entry. The generated app password is printed once.
 
 ## Backup
 
@@ -45,7 +58,17 @@ set +a
 ## Restore
 
 ```bash
-./scripts/restore-client.sh ./backups/altosa_TIMESTAMP.dump
+./scripts/restore-client.sh altosa ./backups/altosa_TIMESTAMP.dump
 ```
+
+## Migrating from the old schema-per-tenant model
+
+For each existing tenant schema (e.g. `altosa` in the `unyx_knowledge` database):
+
+```bash
+./scripts/migrate-schema-to-db.sh altosa "ALTOSA Mobiliario" 1536
+```
+
+The script updates the registry, creates the company database, and copies the data. It does not drop the old schema; after verifying, run the commands printed by the script.
 
 Never commit `.env`, database dumps, backups or client data.
