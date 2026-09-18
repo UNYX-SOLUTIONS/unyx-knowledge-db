@@ -72,7 +72,18 @@ Restores are staged and transactional: the dump is restored into a temporary dat
 
 ## Migrating from the old schema-per-tenant model
 
-For each existing tenant schema (e.g. `altosa` in the `unyx_knowledge` database):
+If no data needs to be preserved (tables not yet populated), the easiest path is to recreate the volume from scratch:
+
+```bash
+docker compose down -v
+docker compose up -d
+set -a
+source .env
+set +a
+./scripts/create-client.sh altosa "ALTOSA Mobiliario" 1536
+```
+
+For each existing tenant schema (e.g. `altosa` in the `unyx_knowledge` database) with data to preserve:
 
 ```bash
 ./scripts/migrate-schema-to-db.sh altosa "ALTOSA Mobiliario" 1536
