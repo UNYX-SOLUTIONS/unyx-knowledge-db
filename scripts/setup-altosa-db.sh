@@ -235,7 +235,7 @@ CREATE INDEX IF NOT EXISTS idx_processed_outgoing_lead
     ON altosa.processed_outgoing_messages (lead_id);
 
 -- Catálogo de productos. Estructura = columnas que consulta el workflow
--- "ALTOSA TOOL - BUSCAR PRODUCTOS" (40 columnas).
+-- "ALTOSA TOOL - BUSCAR PRODUCTOS" (40 columnas en el SELECT + keyword = 41).
 CREATE TABLE IF NOT EXISTS altosa.products (
     id_registro            SERIAL PRIMARY KEY,
     sku                    TEXT,
@@ -287,8 +287,8 @@ SQL
   # Verificación de altosa.products preexistente con otra estructura
   local cols_products
   cols_products="$(psql_consulta "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='altosa' AND table_name='products';")"
-  if [ "$cols_products" != "40" ]; then
-    aviso "altosa.products quedó con $cols_products columnas (esperadas: 40)."
+  if [ "$cols_products" != "41" ]; then
+    aviso "altosa.products quedó con $cols_products columnas (esperadas: 41)."
     aviso "Si ya existía con otra estructura, revisa que las columnas que consulta el workflow coincidan."
   fi
 
@@ -346,13 +346,13 @@ BEGIN
     -- documents
     SELECT pg_get_serial_sequence('public.documents', 'id') INTO v_seq;
     IF v_seq IS NOT NULL THEN
-        EXECUTE format('SELECT setval(%L, COALESCE((SELECT MAX(id) FROM public.documents), 1))', v_seq);
+        EXECUTE format('SELECT setval(%L, COALESCE((SELECT MAX(id) FROM public.documents), 1), (SELECT MAX(id) FROM public.documents) IS NOT NULL)', v_seq);
     END IF;
 
     -- n8n_chat_histories
     SELECT pg_get_serial_sequence('public.n8n_chat_histories', 'id') INTO v_seq;
     IF v_seq IS NOT NULL THEN
-        EXECUTE format('SELECT setval(%L, COALESCE((SELECT MAX(id) FROM public.n8n_chat_histories), 1))', v_seq);
+        EXECUTE format('SELECT setval(%L, COALESCE((SELECT MAX(id) FROM public.n8n_chat_histories), 1), (SELECT MAX(id) FROM public.n8n_chat_histories) IS NOT NULL)', v_seq);
     END IF;
 
     -- altosa.products: detectar la columna serial/identity dinámicamente
@@ -366,7 +366,7 @@ BEGIN
         ORDER BY ordinal_position
         LIMIT 1;
         IF v_seq IS NOT NULL THEN
-            EXECUTE format('SELECT setval(%L, COALESCE((SELECT MAX(%I) FROM altosa.products), 1))', v_seq, v_col);
+            EXECUTE format('SELECT setval(%L, COALESCE((SELECT MAX(%I) FROM altosa.products), 1), (SELECT MAX(%I) FROM altosa.products) IS NOT NULL)', v_seq, v_col, v_col);
         END IF;
     END IF;
 END $$;
@@ -380,7 +380,7 @@ verificar_final() {
   info "Verificaciones finales..."
   echo ""
   echo "--- Tablas ---"
-  psql_ejecutar -c "\dt *.*" 2>/dev/null || true
+  psql_ejecutar -c "\dt public.* altosa.*" 2>/dev/null || true
 
   echo ""
   echo "--- Conteo de filas ---"
