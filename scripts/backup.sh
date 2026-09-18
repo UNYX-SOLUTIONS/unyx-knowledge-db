@@ -42,6 +42,12 @@ while [ $# -gt 0 ]; do
     *) error "Uso: ./backup.sh [--env-file=./.env] [backup|install-cron|list|restore ARCHIVO]" ;;
   esac
 done
+
+# Si no se pasó --env-file y no existe un ./.env junto al script,
+# buscar el .env en la carpeta raíz del proyecto.
+if [ "$ENV_FILE" = "./.env" ] && [ ! -f "$ENV_FILE" ] && [ -f "$SCRIPT_DIR/../.env" ]; then
+  ENV_FILE="$SCRIPT_DIR/../.env"
+fi
 ARCHIVO="${1:-}"
 
 # --- Cargar variables del .env (sin pisar las ya exportadas) ---------------
