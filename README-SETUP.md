@@ -63,9 +63,9 @@ grep -E '^(DB_HOST|DB_PORT|DB_NAME|DB_USER)=' .env
 ```
 
 Qué hace: valida variables → asegura `psql` → verifica conexión (5 reintentos) →
-`CREATE EXTENSION IF NOT EXISTS vector` → crea esquema `altosa` y tablas
-(`n8n_chat_histories`, `documents`, `altosa.processed_outgoing_messages`,
-`altosa.products` con 40 columnas) → índices (HNSW en `documents.embedding`,
+`CREATE EXTENSION IF NOT EXISTS vector` → crea las tablas en el esquema `public`
+(`n8n_chat_histories`, `documents`, `processed_outgoing_messages`,
+`products` con 41 columnas) → índices (HNSW en `documents.embedding`,
 índices de products) → `match_documents` → `setval` de secuencias → verificación
 y resumen. **Es idempotente: puedes re-ejecutarlo sin riesgo.**
 
@@ -80,17 +80,17 @@ PGPASSWORD='LA_DEL_.env' psql -h "$(grep '^DB_HOST=' .env | cut -d= -f2)" \
   -d "$(grep '^DB_NAME=' .env | cut -d= -f2)" -c "\dt *.*"
 ```
 
-Deben aparecer: `n8n_chat_histories`, `documents`, `altosa.products`,
-`altosa.processed_outgoing_messages`.
+Deben aparecer: `n8n_chat_histories`, `documents`, `products`,
+`processed_outgoing_messages`.
 
 ### 3.5 Cargar datos del catálogo (pendiente del cliente)
 
-La tabla `altosa.products` queda creada pero vacía. Cuando ALTOSA entregue el
+La tabla `products` queda creada pero vacía. Cuando ALTOSA entregue el
 catálogo (CSV/Excel), se carga con:
 
 ```bash
 PGPASSWORD='...' psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" \
-  -c "\copy altosa.products (sku, producto_actual, nombre_catalogo, ...) FROM '/ruta/catalogo.csv' CSV HEADER"
+  -c "\copy products (sku, producto_actual, nombre_catalogo, ...) FROM '/ruta/catalogo.csv' CSV HEADER"
 # Ajustar las columnas del \copy a las columnas reales del archivo.
 ```
 

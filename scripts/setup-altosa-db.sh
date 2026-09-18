@@ -17,11 +17,11 @@
 #   2. Valida variables y presencia de psql (lo instala si falta)
 #   3. Verifica conexión al Postgres existente
 #   4. Instala la extensión pgvector si no está
-#   5. Crea el esquema altosa y las tablas:
+#   5. Crea las tablas en el esquema public:
 #        n8n_chat_histories (memoria del agente)
 #        documents (RAG, embedding vector(1536))
-#        altosa.processed_outgoing_messages (idempotencia legacy)
-#        altosa.products (catálogo, estructura completa del workflow)
+#        processed_outgoing_messages (idempotencia legacy)
+#        products (catálogo, estructura completa del workflow)
 #   6. Crea los índices (HNSW para embeddings + índices de products)
 #   7. Crea/reemplaza la función match_documents (RAG)
 #   8. Ajusta secuencias SERIAL (idempotente)
@@ -188,7 +188,7 @@ instalar_extension
 
 # --- 6. Estructura: esquema + tablas + índices -----------------------------
 crear_estructura() {
-  info "Creando esquema 'altosa' y tablas (idempotente)..."
+  info "Creando tablas en el esquema public (idempotente)..."
 
   # documents: si ya existe con otra estructura, avisar (nunca borrar datos en silencio)
   local existe_docs tipo_emb cols_docs
@@ -207,8 +207,7 @@ crear_estructura() {
   fi
 
   psql_ejecutar <<'SQL'
--- Esquema de la aplicación
-CREATE SCHEMA IF NOT EXISTS altosa;
+-- Tablas de la aplicación (esquema public)
 
 -- Memoria del agente (nodo "ALTOSA Chat Memory" de n8n)
 CREATE TABLE IF NOT EXISTS n8n_chat_histories (
@@ -232,17 +231,17 @@ CREATE INDEX IF NOT EXISTS idx_documents_embedding
     ON documents USING hnsw (embedding vector_cosine_ops);
 
 -- Idempotencia para ALTOSA 02 (legacy)
-CREATE TABLE IF NOT EXISTS altosa.processed_outgoing_messages (
+CREATE TABLE IF NOT EXISTS processed_outgoing_messages (
     message_id   TEXT PRIMARY KEY,
     lead_id      TEXT NOT NULL,
     processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_processed_outgoing_lead
-    ON altosa.processed_outgoing_messages (lead_id);
+    ON processed_outgoing_messages (lead_id);
 
 -- Catálogo de productos. Estructura = columnas que consulta el workflow
 -- "ALTOSA TOOL - BUSCAR PRODUCTOS" (40 columnas en el SELECT + keyword = 41).
-CREATE TABLE IF NOT EXISTS altosa.products (
+CREATE TABLE IF NOT EXISTS products (
     id_registro            SERIAL PRIMARY KEY,
     sku                    TEXT,
     producto_actual        TEXT,
@@ -285,16 +284,16 @@ CREATE TABLE IF NOT EXISTS altosa.products (
     aprobado               TEXT,
     keyword                TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_products_aprobado  ON altosa.products (aprobado);
-CREATE INDEX IF NOT EXISTS idx_products_categoria ON altosa.products (categoria_actual);
-CREATE INDEX IF NOT EXISTS idx_products_sku       ON altosa.products (sku);
+CREATE INDEX IF NOT EXISTS idx_products_aprobado  ON products (aprobado);
+CREATE INDEX IF NOT EXISTS idx_products_categoria ON products (categoria_actual);
+CREATE INDEX IF NOT EXISTS idx_products_sku       ON products (sku);
 SQL
 
-  # Verificación de altosa.products preexistente con otra estructura
+  # Verificación de products preexistente con otra estructura
   local cols_products
-  cols_products="$(psql_consulta "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='altosa' AND table_name='products';")"
+  cols_products="$(psql_consulta "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='products';")"
   if [ "$cols_products" != "41" ]; then
-    aviso "altosa.products quedó con $cols_products columnas (esperadas: 41)."
+    aviso "products quedó con $cols_products columnas (esperadas: 41)."
     aviso "Si ya existía con otra estructura, revisa que las columnas que consulta el workflow coincidan."
   fi
 
@@ -361,18 +360,18 @@ BEGIN
         EXECUTE format('SELECT setval(%L, COALESCE((SELECT MAX(id) FROM public.n8n_chat_histories), 1), (SELECT MAX(id) FROM public.n8n_chat_histories) IS NOT NULL)', v_seq);
     END IF;
 
-    -- altosa.products: detectar la columna serial/identity dinámicamente
-    IF to_regclass('altosa.products') IS NOT NULL THEN
-        SELECT column_name, pg_get_serial_sequence('altosa.products', column_name)
+    -- products: detectar la columna serial/identity dinámicamente
+    IF to_regclass('public.products') IS NOT NULL THEN
+        SELECT column_name, pg_get_serial_sequence('public.products', column_name)
           INTO v_col, v_seq
         FROM information_schema.columns
-        WHERE table_schema = 'altosa'
+        WHERE table_schema = 'public'
           AND table_name = 'products'
           AND (column_default LIKE 'nextval(%' OR is_identity = 'YES')
         ORDER BY ordinal_position
         LIMIT 1;
         IF v_seq IS NOT NULL THEN
-            EXECUTE format('SELECT setval(%L, COALESCE((SELECT MAX(%I) FROM altosa.products), 1), (SELECT MAX(%I) FROM altosa.products) IS NOT NULL)', v_seq, v_col, v_col);
+            EXECUTE format('SELECT setval(%L, COALESCE((SELECT MAX(%I) FROM public.products), 1), (SELECT MAX(%I) FROM public.products) IS NOT NULL)', v_seq, v_col, v_col);
         END IF;
     END IF;
 END $$;
@@ -386,14 +385,14 @@ verificar_final() {
   info "Verificaciones finales..."
   echo ""
   echo "--- Tablas ---"
-  psql_ejecutar -c "\dt public.* altosa.*" 2>/dev/null || true
+  psql_ejecutar -c "\dt public.*" 2>/dev/null || true
 
   echo ""
   echo "--- Conteo de filas ---"
   psql_consulta "SELECT 'n8n_chat_histories', COUNT(*) FROM n8n_chat_histories
                  UNION ALL SELECT 'documents', COUNT(*) FROM documents
-                 UNION ALL SELECT 'altosa.processed_outgoing_messages', COUNT(*) FROM altosa.processed_outgoing_messages
-                 UNION ALL SELECT 'altosa.products', COUNT(*) FROM altosa.products;" | sed 's/^/    /' || true
+                 UNION ALL SELECT 'processed_outgoing_messages', COUNT(*) FROM processed_outgoing_messages
+                 UNION ALL SELECT 'products', COUNT(*) FROM products;" | sed 's/^/    /' || true
 
   echo ""
   echo "--- Embeddings (dimensión esperada: 1536) ---"
