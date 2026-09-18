@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export MSYS_NO_PATHCONV=1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTAINER="${DB_CONTAINER:-unyx-knowledge-db}"
@@ -29,6 +30,18 @@ fi
 DB_NAME="${TENANT_KEY//-/_}"
 APP_ROLE="${DB_NAME}_app"
 APP_PASSWORD="$(openssl rand -base64 32 | tr -d '\n')"
+
+echo "==> Verificando disponibilidad de PostgreSQL"
+for i in $(seq 1 30); do
+  if docker exec "$CONTAINER" pg_isready -U "$ADMIN_USER" -d "$ADMIN_DB" -q; then
+    break
+  fi
+  if [[ "$i" == "30" ]]; then
+    echo "ERROR: PostgreSQL no está disponible."
+    exit 1
+  fi
+  sleep 1
+done
 
 echo "==> Creando rol de aplicación: $APP_ROLE"
 docker exec -i "$CONTAINER" psql \
@@ -70,10 +83,11 @@ docker exec "$CONTAINER" psql \
   -v ON_ERROR_STOP=1 \
   -c "REVOKE CONNECT ON DATABASE $DB_NAME FROM PUBLIC; GRANT CONNECT ON DATABASE $DB_NAME TO $APP_ROLE;"
 
-echo "==> Aplicando esquema base en $DB_NAME"
+echo "==> Aplicando esquema base en $DB_NAME (transacción única)"
 docker exec -i "$CONTAINER" psql \
   -U "$APP_ROLE" \
   -d "$DB_NAME" \
+  --single-transaction \
   -v ON_ERROR_STOP=1 \
   -v dim="$EMBEDDING_DIM" \
   < "$SCRIPT_DIR/../database/client/schema.sql"

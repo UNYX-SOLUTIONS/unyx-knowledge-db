@@ -61,6 +61,15 @@ This creates: the app role, the company database (`unyx-solutions` -> `unyx_solu
 ./scripts/restore-client.sh altosa ./backups/altosa_TIMESTAMP.dump
 ```
 
+Restores are staged and transactional: the dump is restored into a temporary database, validated, and only then swapped with the live one. A failed or corrupt restore never touches the live database.
+
+## Durability and recovery
+
+- Explicit durability flags in `docker-compose.yml` (`fsync`, `synchronous_commit`, `full_page_writes`)
+- Schema provisioning runs in a single transaction
+- Staged + validated restores; the previous database is kept until the new one is verified
+- Persistent data lives in the `unyx-knowledge-data` volume and `./backups`; only caches/buffers are volatile (see `docs/architecture.md`)
+
 ## Migrating from the old schema-per-tenant model
 
 For each existing tenant schema (e.g. `altosa` in the `unyx_knowledge` database):

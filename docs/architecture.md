@@ -50,6 +50,32 @@ Universal fields are relational columns. Company-specific attributes are stored 
 
 `unyx_core.tenants` tracks: `tenant_key`, `display_name`, `database_name`, `app_role`, `status` and `config`.
 
+## Data lifecycle: volatile vs persistent
+
+Persistent (survive restarts and crashes):
+
+- PostgreSQL data files + WAL in the named volume `unyx-knowledge-data`
+- Database dumps in `./backups`
+- The tenant registry in the admin database
+
+Volatile (lost on restart, by design):
+
+- PostgreSQL `shared_buffers` and OS page cache
+- Query/plan caches and connection state
+- HNSW index build memory
+
+No critical data lives only in memory: every create/edit/delete is written through a PostgreSQL transaction to WAL + data files before being acknowledged to the application.
+
+## Durability and recovery
+
+- Explicit durability settings in `docker-compose.yml`: `fsync=on`, `synchronous_commit=on`, `full_page_writes=on`.
+- Client provisioning applies the whole schema in a single transaction (`--single-transaction`): a failed provisioning never leaves a half-created database.
+- Edits to `products` and `documents` auto-maintain `updated_at` via the `touch_updated_at` trigger.
+- Restore is staged: the dump is restored into a `_staging` database inside a single transaction, validated (the three core tables must exist), and only then swapped with the live database via rename. The previous database is kept as `_old` until the end, and is restored if anything fails.
+- Backups are consistent snapshots (`pg_dump -Fc`) per company database.
+- On unexpected crash (power loss, kill), PostgreSQL replays WAL automatically at startup: committed transactions are preserved, uncommitted ones are rolled back.
+
+
 ## Docker networks
 
 - `unyx-ai`: n8n and AI services

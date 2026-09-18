@@ -10,6 +10,15 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       TZ: ${TZ:-America/Guayaquil}
 
+    command:
+      - "postgres"
+      - "-c"
+      - "fsync=on"
+      - "-c"
+      - "synchronous_commit=on"
+      - "-c"
+      - "full_page_writes=on"
+
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d:ro

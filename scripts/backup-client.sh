@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export MSYS_NO_PATHCONV=1
 
 CONTAINER="${DB_CONTAINER:-unyx-knowledge-db}"
 ADMIN_USER="${POSTGRES_USER:-unyx_admin}"

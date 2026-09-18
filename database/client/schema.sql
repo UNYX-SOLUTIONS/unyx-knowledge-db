@@ -99,3 +99,26 @@ AS $$
     ORDER BY d.embedding <=> query_embedding
     LIMIT GREATEST(match_count, 1);
 $$;
+
+CREATE OR REPLACE FUNCTION public.touch_updated_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS products_touch_updated_at ON public.products;
+CREATE TRIGGER products_touch_updated_at
+    BEFORE UPDATE ON public.products
+    FOR EACH ROW
+    EXECUTE FUNCTION public.touch_updated_at();
+
+DROP TRIGGER IF EXISTS documents_touch_updated_at ON public.documents;
+CREATE TRIGGER documents_touch_updated_at
+    BEFORE UPDATE ON public.documents
+    FOR EACH ROW
+    EXECUTE FUNCTION public.touch_updated_at();
+
